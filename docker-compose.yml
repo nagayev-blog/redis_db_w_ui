@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis/redis-stack-server:7.4.0-v1
+    container_name: redis-rag
+    restart: unless-stopped
+    environment:
+      - REDIS_ARGS=--requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAXMEMORY} --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - traefik_default
+      - redis_internal
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_default"
+      - "traefik.tcp.routers.redis.rule=HostSNI(`${HOST}`)"
+      - "traefik.tcp.routers.redis.entrypoints=websecure"
+      - "traefik.tcp.routers.redis.tls=true"
+      - "traefik.tcp.routers.redis.tls.certresolver=letsencrypt"
+      - "traefik.tcp.routers.redis.service=redis"
+      - "traefik.tcp.services.redis.loadbalancer.server.port=6379"
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - redisinsight_data:/data
+    networks:
+      - traefik_default
+      - redis_internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_default"
+      - "traefik.http.routers.redisinsight.rule=Host(`ui.${HOST}`)"
+      - "traefik.http.routers.redisinsight.entrypoints=websecure"
+      - "traefik.http.routers.redisinsight.tls.certresolver=letsencrypt"
+      - "traefik.http.services.redisinsight.loadbalancer.server.port=5540"
+      - "traefik.http.routers.redisinsight.middlewares=redisinsight-auth"
+      - "traefik.http.middlewares.redisinsight-auth.basicauth.users=${INSIGHT_AUTH}"
+
+networks:
+  traefik_default:
+    external: true
+    name: traefik_default
+  redis_internal:
+    driver: bridge
+
+volumes:
+  redis_data:
+  redisinsight_data:
